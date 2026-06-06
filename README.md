@@ -1,6 +1,6 @@
 # RiskSteer: Lightweight Risk-Controlled Planner Steering in PostgreSQL
 
-**James Daramola, PhD Candidate** · **Priya Deshpande, Assistant Professor**  
+**James Daramola, PhD Student** · **Priya Deshpande, Assistant Professor**  
 Department of Electrical and Computer Engineering, Marquette University
 
 > *Submitted to SSDBM 2026*
