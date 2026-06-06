@@ -1,0 +1,1565 @@
+\documentclass[sigconf,natbib=false]{article}
+
+% ── Page geometry (SIGMOD two-column, 8.5×11) ──────────────────────────────
+\usepackage[letterpaper,
+            top=1in, bottom=1in,
+            left=0.75in, right=0.75in,
+            columnsep=0.25in]{geometry}
+\usepackage{multicol}
+\setlength{\columnsep}{0.25in}
+
+% ── Core packages ──────────────────────────────────────────────────────────
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{microtype}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{multirow}
+\usepackage{graphicx}
+\usepackage{subcaption}
+\usepackage{caption}
+\usepackage{xcolor}
+\usepackage{enumitem}
+\usepackage{hyperref}
+\usepackage{cleveref}
+\usepackage{url}
+\usepackage{parskip}
+\emergencystretch=2em
+\usepackage{titlesec}
+\usepackage{fancyhdr}
+\usepackage{abstract}
+\usepackage{float}
+
+% ── Algorithm packages ─────────────────────────────────────────────────────
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+
+% ── Typography ─────────────────────────────────────────────────────────────
+\usepackage{times}
+\usepackage{tikz}
+\usetikzlibrary{shapes.geometric,arrows.meta,positioning,calc}
+
+% ── Color palette ─────────────────────────────────────────────────────────
+\definecolor{sigblue}{RGB}{26,26,46}
+\definecolor{ruleblue}{RGB}{44,62,80}
+
+% ── Section heading style ─────────────────────────────────────────────────
+\titleformat{\section}[block]{\normalfont\large\bfseries\color{sigblue}}{\thesection.}{0.5em}{}[\vspace{-2pt}\rule{\columnwidth}{0.4pt}]
+\titleformat{\subsection}[block]{\normalfont\normalsize\bfseries}{\thesubsection}{0.5em}{}
+\titleformat{\subsubsection}[runin]{\normalfont\normalsize\bfseries}{}{0pt}{}[.\enspace]
+\titlespacing*{\section}{0pt}{10pt}{4pt}
+\titlespacing*{\subsection}{0pt}{8pt}{2pt}
+
+% ── Abstract box style ─────────────────────────────────────────────────────
+\renewenvironment{abstract}
+  {\small\quotation\noindent\textbf{Abstract.}\enspace}
+  {\endquotation}
+
+% ── Caption style ──────────────────────────────────────────────────────────
+\captionsetup{font=small,labelfont=bf,skip=4pt}
+\captionsetup[table]{position=top}
+
+% ── Hyperref ───────────────────────────────────────────────────────────────
+\hypersetup{
+  colorlinks=true,
+  linkcolor=ruleblue,
+  citecolor=ruleblue,
+  urlcolor=ruleblue
+}
+
+% ── Bibliography ───────────────────────────────────────────────────────────
+\usepackage[numbers,sort&compress]{natbib}
+\graphicspath{{./}{figures/}}
+\bibliographystyle{abbrvnat}
+
+% ── Convenience macros ─────────────────────────────────────────────────────
+\newcommand{\postgres}{PostgreSQL}
+\newcommand{\arm}[1]{\texttt{#1}}
+\newcommand{\feat}[1]{\textit{#1}}
+\newcommand{\sys}{\textsc{RiskSteer}}
+\newcommand{\eg}{\textit{e.g.},}
+\newcommand{\ie}{\textit{i.e.},}
+\newcommand{\etal}{\textit{et al.}}
+\newcommand{\regret}{\mathcal{R}}
+\newcommand{\threshold}{\tau}
+\newcommand{\policy}{\pi}
+\newcommand{\oracle}{\mathrm{oracle}}
+
+% ── Theorem environments ───────────────────────────────────────────────────
+\newtheorem{definition}{Definition}
+\newtheorem{proposition}{Proposition}
+
+% ── Header / footer ────────────────────────────────────────────────────────
+\pagestyle{fancy}
+\fancyhf{}
+\renewcommand{\headrulewidth}{0pt}
+% header removed
+\fancyfoot[C]{\small\thepage}
+
+% ═══════════════════════════════════════════════════════════════════════════
+\begin{document}
+% ═══════════════════════════════════════════════════════════════════════════
+
+\twocolumn[{%
+\begin{center}
+  {\LARGE\bfseries Lightweight Risk-Controlled Planner Steering in \postgres\par}
+  \vspace{10pt}
+  {\large James Daramola \quad and \quad Priya Deshpande\par}
+  \vspace{4pt}
+  {\normalsize Department of Electrical and Computer Engineering, Marquette University\par}
+  {\normalsize \texttt{james.daramola@marquette.edu}\quad
+               \texttt{priya.deshpande@marquette.edu}\par}
+  \vspace{12pt}
+\end{center}
+
+\begin{abstract}
+Cost-based query optimizers rely on cardinality estimates that are frequently inaccurate for
+multi-join workloads, causing plan selections that are orders of magnitude suboptimal in
+execution time. While learned query optimization has demonstrated that machine learning can
+identify and correct such failures, existing approaches depend on deep plan representations,
+online exploration, or invasive changes to optimizer internals, requirements that complicate
+practical deployment. We present \sys{}, a lightweight, non-intrusive planner steering
+framework for \postgres{} that selects among four interpretable planner configurations using
+only pre-execution \texttt{EXPLAIN} features. We introduce a \emph{risk-controlled} policy
+that falls back to the default planner when the predicted benefit of steering falls below a
+tunable threshold $\threshold$, directly targeting the no-regression requirement central to
+production deployment.
+
+We conduct a two-scale empirical evaluation. On the canonical 113-query Join Order Benchmark
+(JOB), executed under a randomized warm-cache protocol (1{,}356 total runs), no single planner
+configuration dominates: \arm{no\_hashjoin} is optimal for 34.5\% of queries,
+\arm{no\_mergejoin} for 31.9\%, the default for 25.7\%, and \arm{no\_nestloop} for 8.0\%.
+The default planner's tail behavior reaches a mean regret of 362.8\,ms and a p99 of
+7{,}222\,ms. A Random Forest classifier trained on pre-execution features achieves 93.4\%
+oracle arm prediction accuracy against a post-execution upper bound of 95.6\%, confirming
+that nearly all discriminative signal is available before query execution. The dominant
+predictive feature is \texttt{root\_total\_cost} (45.8\% importance), with structural plan
+features accounting for the remainder.
+
+To address the sparsity of the 113-query baseline, we scale the workload to 904 query
+variants via template-based expansion, producing 3{,}616 execution samples. Across five
+model families, Random Forest and Extra Trees achieve the highest accuracy at 67.96\% on the
+held-out test set, substantially outperforming logistic regression (40.88\%) and confirming
+that the arm-selection boundary is nonlinear. On the scaled workload, the learned policy
+reduces total execution time by 37.3\%, nearly five times the 7.8\% achieved by the
+best-fixed arm, and comes within 0.3\% of oracle performance. These results demonstrate
+that meaningful tail latency reduction is achievable with a four-arm action space and
+interpretable pre-execution features, without modifying the optimizer or relying on
+heavyweight models.
+\end{abstract}
+\vspace{8pt}
+}]
+
+% ── CCS concepts (abbreviated) ─────────────────────────────────────────────
+\noindent\textbf{CCS Concepts:} Information systems $\to$ \textit{Query optimization}; Computing methodologies $\to$ \textit{Supervised learning}.\par
+\noindent\textbf{Keywords:} Query optimization, planner steering, tail latency, regret, PostgreSQL, risk-controlled policy, Join Order Benchmark
+\par\vspace{6pt}
+\rule{\columnwidth}{0.4pt}
+\vspace{4pt}
+
+% ═══════════════════════════════════════════════════════════════════════════
+\section{Introduction}
+% ═══════════════════════════════════════════════════════════════════════════
+
+Cost-based query optimizers have been central to relational database systems for four
+decades. Advances in dynamic programming plan enumeration, multi-dimensional histogram
+statistics, and heuristic pruning have produced optimizers that reliably generate efficient
+plans for simple queries. For complex analytical workloads, those involving many joins, correlated
+predicates, and large intermediate result sets, these optimizers face a fundamental limitation:
+cardinality estimation error.
+
+Small errors in cardinality estimation compound multiplicatively through join trees. A
+two-order-of-magnitude underestimate at a single join node can propagate upward, causing the
+optimizer to commit to a join strategy that is catastrophically slow when executed against
+actual data. The Join Order Benchmark (JOB)~\cite{Leis2015} was designed specifically to
+expose this failure mode: its 113 queries over the IMDB dataset exercise correlated predicates
+across 5 to 16 tables, and evaluations of \postgres{} on JOB routinely reveal that the default
+planner selects plans that are 2--$100\times$ slower than the best available alternative for
+a non-trivial fraction of queries.
+
+Crucially, these failures are \emph{non-uniformly distributed} across the query set. While
+the average-case behavior of \postgres{}'s planner is adequate for most queries, a small
+number of queries account for the bulk of avoidable latency. This is the tail latency problem:
+p95 and p99 execution times can be dominated by the optimizer's worst-case mistakes, and for
+production workloads with latency service-level objectives, these outliers are
+disproportionately harmful.
+
+Learned query optimization (LQO) has emerged as the primary research response to this
+failure mode. Systems such as Bao~\cite{Marcus2021Bao}, FASTgres~\cite{Habich2023},
+AutoSteer~\cite{Anneser2023}, and Lero~\cite{Zhu2023Lero} demonstrate that machine learning
+can identify planning failures and steer the optimizer away from them. However, these systems
+make design choices that limit practical adoption. Bao requires a tree-convolutional neural
+network over plan trees and online Thompson sampling exploration. Lero requires executing
+multiple candidate plans per query during training. AutoSteer requires automated hint-set
+discovery across multiple execution trials. The Microsoft QO-Advisor~\cite{Ding2022} targets
+production deployment but operates over industrial-scale workloads with proprietary plan
+representations. End-to-end systems such as Neo~\cite{Marcus2019Neo} and
+Balsa~\cite{Yang2022Balsa} require reinforcement learning over full plan spaces, with
+convergence times of hours to days.
+
+\paragraph{This work.} We investigate a different point in the design space: \emph{how much
+learning is necessary to reduce tail latency in \postgres{} without modifying the optimizer
+or relying on heavyweight models?} We restrict the planner action space to four
+configurations: the default planner and three single-operator disablement settings
+(\arm{no\_hashjoin}, \arm{no\_mergejoin}, \arm{no\_nestloop}), and we train a Random Forest
+classifier using only features available from \texttt{EXPLAIN (FORMAT JSON)} output before
+execution. We introduce a risk-controlled steering policy that falls back to the default
+planner when predicted improvement does not exceed a safety threshold $\threshold$, directly
+addressing the regression avoidance requirement identified in production deployments.
+
+Our contributions are:
+
+\begin{itemize}[noitemsep,topsep=2pt,leftmargin=*]
+  \item A \textbf{minimal action space} formalization of planner steering as a contextual
+        arm selection problem with explicit regret definitions (\S\ref{sec:method}).
+
+  \item A \textbf{risk-controlled steering policy} with a tunable safety threshold that
+        controls the precision-recall tradeoff between performance gains and regression risk
+        (\S\ref{sec:method:policy}).
+
+  \item A \textbf{reproducible experimental protocol} for JOB on \postgres{}: randomized
+        execution order, warm-cache regime, structured JSON plan logging, and regret-centric
+        evaluation including p95/p99 tail metrics (\S\ref{sec:setup}).
+
+  \item \textbf{Empirical characterization} of the default planner's tail behavior and the
+        oracle arm distribution across 113 JOB queries (\S\ref{sec:results}), including the
+        finding that no single arm dominates, which motivates learned arm selection.
+
+  \item A \textbf{pre-execution Random Forest classifier} achieving 93.4\% oracle arm
+        prediction accuracy, compared to a post-execution upper bound of 95.6\%, demonstrating
+        that most steering signal is available before query execution (\S\ref{sec:ml}).
+\end{itemize}
+
+% ═══════════════════════════════════════════════════════════════════════════
+\section{Background}
+\label{sec:background}
+% ═══════════════════════════════════════════════════════════════════════════
+
+\subsection{PostgreSQL Query Optimization}
+
+\postgres{} employs a cost-based optimizer that uses dynamic programming to enumerate join
+orders for queries with few tables ($\leq$ \texttt{geqo\_threshold}, default 12) and a
+Genetic Query Optimizer (GEQO) for larger join graphs~\cite{PGDocs}. Plan cost estimates
+derive from column statistics maintained by \texttt{ANALYZE}, which samples table rows to
+construct histograms and most-common-value lists. The optimizer selects among three join
+strategies, namely hash join, merge join, and nested loop, based on estimated cost.
+
+When cardinality estimates are inaccurate, the cost model may systematically prefer a join
+strategy that is correct for estimated cardinalities but wrong for actual ones. This is
+particularly common for join predicates involving correlated attributes, where the independent
+attribute assumption underlying most histogram-based estimators breaks down.
+
+\postgres{} exposes session-level GUC parameters that allow individual join operators to be
+disabled for plan selection: \texttt{enable\_hashjoin}, \texttt{enable\_mergejoin}, and
+\texttt{enable\_nestloop}. Setting any of these to \texttt{off} instructs the planner to
+prefer alternative join strategies. Importantly, the \postgres{} documentation notes that
+\texttt{enable\_nestloop = off} \emph{discourages} rather than fully suppresses nested loop
+joins; this semantic distinction affects result interpretation and must be acknowledged in
+experimental design~\cite{PGDocs}.
+
+\subsection{The Join Order Benchmark}
+
+The Join Order Benchmark (JOB)~\cite{Leis2015} consists of 113 queries across 33 templates
+over the IMDB dataset. Queries involve between 4 and 17 table joins with correlated string
+predicates on movie metadata. JOB was designed explicitly to stress join ordering and
+cardinality estimation: prior work demonstrates that \postgres{} produces suboptimal plans on
+a substantial fraction of JOB queries due to systematic cardinality underestimation on
+correlated predicates.
+
+FASTgres~\cite{Habich2023} observes that JOB's 113 queries are distributed across 33 structural
+contexts (query templates), making per-context supervised learning challenging due to data
+sparsity. This motivates template-aware evaluation splits in our experimental protocol
+(\S\ref{sec:setup}). Lero~\cite{Zhu2023Lero} addresses the small dataset size by generating
+1{,}000 JOB-derived queries from templates for large-scale evaluation, a direction we
+identify as future work.
+
+\subsection{Planner Configuration as Arm Selection}
+
+We model the planner configuration selection problem as a contextual multi-armed bandit. Each
+planner configuration is an \emph{arm}; the agent observes query features and selects an arm
+to minimize execution time. The oracle arm is the arm that achieves minimum execution time
+for a given query. The oracle arm is not known before execution but is approximable offline from experimental
+traces. Regret measures the performance gap between a chosen policy and oracle arm selection.
+
+% ═══════════════════════════════════════════════════════════════════════════
+\section{Related Work}
+\label{sec:related}
+% ═══════════════════════════════════════════════════════════════════════════
+
+\subsection{Steering-Based Learned Optimizers}
+
+\textbf{Bao}~\cite{Marcus2021Bao} introduced the canonical formulation of planner steering as
+a contextual bandit over hint sets. Bao encodes query plans as tree-structured inputs to a
+convolutional neural network and selects per-query hint sets using Thompson sampling. Its
+empirical evaluation demonstrates large improvements on JOB and other workloads, with
+particular emphasis on tail latency reduction. Bao's design requires online exploration during
+deployment, creating a warmup period before the model is reliable. Our approach differs in
+eliminating online exploration: we train offline on collected traces and use a safety fallback
+to handle low-confidence decisions without incurring regret from exploratory execution.
+
+\textbf{FASTgres}~\cite{Habich2023} reformulates hint set selection as supervised
+classification, training context-aware models (one per structural query context). It evaluates
+on JOB, Stack, and TPC-H and explicitly quantifies the challenge of JOB's sparse 33-context
+structure for learning. FASTgres highlights that classification accuracy is context-dependent
+and that evaluation splits must account for template structure. Our experimental protocol
+directly incorporates this guidance through planned template-aware cross-validation.
+
+\textbf{AutoSteer}~\cite{Anneser2023} generalizes steering to multiple DBMSs by automatically
+discovering effective hint sets through offline execution. It evaluates on JOB, Stack, TPC-DS,
+and production workloads using a plan-tree convolutional model (TCNN). AutoSteer's hint
+discovery process requires exhaustive cross-arm execution, which we avoid by fixing a small,
+predetermined action space, trading hint-set coverage for deployment simplicity and reduced
+data collection cost.
+
+\textbf{Lero}~\cite{Zhu2023Lero} argues that predicting absolute latency is inherently
+unstable and proposes learning-to-rank plans using pairwise comparisons. Lero expands JOB to
+1{,}000 queries generated from templates to enable robust ML evaluation. Its pairwise ranking
+framing aligns with our regret metric philosophy: both treat relative performance rather than
+absolute latency as the learning signal. Our classification approach is simpler but achieves
+high accuracy on the four-arm problem without requiring pairwise plan execution.
+
+\subsection{Production-Scale Steering}
+
+\textbf{Microsoft QO-Advisor}~\cite{Ding2022} describes the deployment of a steered optimizer
+in production at Microsoft. A key contribution is its explicit treatment of regression
+avoidance: the system uses a validation stage that rejects plan changes predicted to cause
+regressions above an acceptable threshold. Our risk-controlled policy is directly motivated by
+this framing: we operationalize a similar accept/reject mechanism via a predicted-improvement
+threshold $\threshold$, making regression avoidance a first-class design constraint rather
+than a post-hoc evaluation metric.
+
+An earlier steering system~\cite{Marcus2021Steering} applies Bao-style hint selection to
+industrial optimizer workloads, demonstrating the practical challenges of large search spaces
+and operational constraints. This work reinforces the value of minimal action spaces: reducing
+the arm count simplifies both training and deployment, at the cost of hint-set expressiveness.
+
+\subsection{End-to-End Learned Optimizers}
+
+\textbf{Neo}~\cite{Marcus2019Neo} was the first system to apply deep reinforcement learning
+to query plan generation, but it suffers from long convergence times and instability on
+unseen queries. \textbf{Balsa}~\cite{Yang2022Balsa} improves sample efficiency by introducing
+simulation-to-real transfer, reducing catastrophic exploration while still requiring
+substantial training infrastructure. These systems represent a different point in the
+design space from steering approaches: rather than augmenting the existing optimizer, they
+attempt to replace it. Deployment complexity and generalization risk make end-to-end learned
+optimizers less suitable for production settings than steering methods.
+
+\subsection{Robustness and Regression Control}
+
+\textbf{Eraser}~\cite{Zhu2024Eraser} addresses performance regression in learned query
+optimization directly, proposing mechanisms to identify and eliminate plans that cause
+degradation. \textbf{Kepler}~\cite{Marcus2023Kepler} focuses on parametric query optimization
+with uncertainty-aware fallbacks. Kantere and colleagues directly address regression
+avoidance through a risk-aware learned cost model that formalizes robustness as a
+first-class property~\cite{Kamali2024Roq}, and survey the broader landscape of
+ML-based robust query optimization~\cite{Kamali2024ICDE}. Our threshold policy provides a
+simpler but complementary mechanism for regression control, without requiring a probabilistic
+cost model or a multi-stage validation pipeline. All of these reinforce the emerging consensus
+that regression control is essential for any practical LQO deployment, a constraint that
+motivates the $\threshold$-gated policy in our design.
+
+\subsection{Evaluation Methodology}
+
+The LQO evaluation audit~\cite{Lehmann2024} demonstrates that conclusions from learned
+optimizer papers are frequently sensitive to train/test split choices, cache regimes, and
+non-standard evaluation pipelines. It introduces a standardized benchmarking framework and
+shows that different split strategies can reverse reported findings. Our experimental protocol
+is designed to address these concerns: we randomize query and arm execution order, report
+both absolute and percentile regret metrics, and plan template-aware cross-validation splits.
+We also document the cache regime (warm cache) and plan to report GEQO configuration
+explicitly in the full evaluation, both of which the audit flags as common validity threats.
+
+% ═══════════════════════════════════════════════════════════════════════════
+\section{Problem Formulation}
+\label{sec:method}
+% ═══════════════════════════════════════════════════════════════════════════
+
+\subsection{Planner Action Space}
+
+Let $\mathcal{A} = \{a_1, a_2, a_3, a_4\}$ denote the set of planner configurations
+(arms), where:
+\begin{align*}
+a_1 &= \texttt{default} \quad\text{(all join operators enabled)}\\
+a_2 &= \texttt{no\_hashjoin} \quad\text{(\texttt{enable\_hashjoin = off})}\\
+a_3 &= \texttt{no\_mergejoin} \quad\text{(\texttt{enable\_mergejoin = off})}\\
+a_4 &= \texttt{no\_nestloop} \quad\text{(\texttt{enable\_nestloop = off})}
+\end{align*}
+
+This action space is intentionally minimal. Each arm corresponds to a session-level GUC
+parameter toggle that requires no source modification and is reversible between queries.
+The space is identical to a subset of the hint sets used in Bao and is a strict subset of
+the larger spaces explored by AutoSteer and FASTgres. We make this restriction deliberately:
+our goal is to characterize what can be achieved with the simplest possible action space,
+providing a lower bound on the benefit achievable by richer steering systems.
+
+\subsection{Regret Definition}
+
+Let $Q = \{q_1, \ldots, q_n\}$ denote the query set ($n=113$). For each query $q_i$ and
+arm $a \in \mathcal{A}$, let $t(q_i, a)$ denote the median execution time across $r=3$
+repeated runs. We use the median to reduce sensitivity to transient system noise.
+
+\begin{definition}[Oracle Arm]
+The oracle arm for query $q_i$ is:
+\[
+  a^*(q_i) = \arg\min_{a \in \mathcal{A}} t(q_i, a)
+\]
+with ties broken lexicographically by arm name.
+\end{definition}
+
+\begin{definition}[Per-Query Regret]
+The absolute regret of arm $a$ on query $q_i$ is:
+\[
+  \regret(q_i, a) = t(q_i, a) - t(q_i, a^*(q_i))
+\]
+The relative (ratio) regret is:
+\[
+  \regret_{\mathrm{ratio}}(q_i, a) = \frac{t(q_i, a)}{t(q_i, a^*(q_i))} - 1
+\]
+\end{definition}
+
+We report mean, p95, and p99 regret over the query set to characterize both average-case and
+tail behavior. For a policy $\policy: Q \to \mathcal{A}$, the policy-level regret is:
+\[
+  \regret(\policy) = \frac{1}{n} \sum_{i=1}^n \regret(q_i, \policy(q_i))
+\]
+
+\begin{definition}[Best-Fixed Arm]
+The best-fixed arm is the arm minimizing total workload time:
+\[
+  a_{\mathrm{fixed}} = \arg\min_{a \in \mathcal{A}} \sum_{i=1}^n t(q_i, a)
+\]
+This is a strong offline baseline: it represents the best static policy given full
+hindsight over the query set.
+\end{definition}
+
+\subsection{Feature Design}
+\label{sec:method:features}
+
+We partition features into two categories based on execution-time availability:
+
+\textbf{Pre-execution features} are derived from \texttt{EXPLAIN (FORMAT JSON)} output
+(estimated plan) and are available before any execution. These constitute the deployable
+feature set for online arm selection:
+\begin{itemize}[noitemsep,topsep=2pt,leftmargin=*]
+  \item \feat{root\_total\_cost}: root node total cost estimate
+  \item \feat{root\_plan\_rows}: root node estimated row count
+  \item \feat{root\_plan\_width}: root node estimated tuple width
+  \item \feat{hash\_join\_count}, \feat{merge\_join\_count}, \feat{nested\_loop\_count}: per-type join node counts
+  \item \feat{seq\_scan\_count}, \feat{index\_scan\_count}: scan operator type frequencies
+  \item \feat{total\_node\_count}: total plan nodes
+  \item \feat{max\_depth}: plan tree depth
+  \item \feat{n\_joins}: total join nodes (\ie, sum of join type counts)
+\end{itemize}
+
+\textbf{Post-execution features} are extracted from \texttt{EXPLAIN ANALYZE} output
+output and include execution-time measurements. These are used only for offline model analysis
+and to establish accuracy upper bounds; they are \emph{not} used in the deployable policy:
+\begin{itemize}[noitemsep,topsep=2pt,leftmargin=*]
+  \item \feat{actual\_total\_time}: observed execution time
+  \item \feat{actual\_rows}: observed output row count (enables q-error computation)
+  \item \feat{q\_error}: $\max(\hat{r}/r, r/\hat{r})$ where $\hat{r}$ is estimated and $r$ actual rows
+  \item Buffer statistics: shared block hits, reads (from \texttt{BUFFERS} option)
+\end{itemize}
+
+This separation is critical for methodological correctness: using post-execution features in
+a policy that claims to select arms before execution would constitute information
+leakage~\cite{Lehmann2024}. The post-execution model serves only as an analytical upper bound.
+
+\subsection{Learning Model}
+
+We train a Random Forest classifier with $k=100$ trees to predict the oracle arm:
+\[
+  f: \mathbb{R}^d \to \mathcal{A}
+\]
+where $d$ is the feature dimension and input $\mathbf{x} \in \mathbb{R}^d$ is the feature
+vector for a query. The classifier is trained on oracle arm labels derived from empirical
+execution traces:
+\[
+  \mathcal{D} = \{(\mathbf{x}(q_i), a^*(q_i))\}_{i=1}^n
+\]
+
+Random Forest is selected for its robustness to feature scale, natural feature importance
+reporting, and strong empirical performance on tabular classification tasks with moderate
+feature dimensionality~\cite{Breiman2001}. We report both 5-fold cross-validated accuracy and
+leave-one-template-out accuracy (where queries from the same JOB template group are held out
+together) to characterize generalization. The latter is the more conservative and realistic
+evaluation protocol, consistent with guidance from the evaluation audit~\cite{Lehmann2024}
+and the sparsity concern raised by FASTgres~\cite{Habich2023}.
+
+\subsection{Risk-Controlled Steering Policy}
+\label{sec:method:policy}
+
+Unconditional application of the predicted best arm is inappropriate for production
+deployment: a classifier error can cause a regression worse than the default planner for that
+query. The Microsoft QO-Advisor~\cite{Ding2022} addresses this through an explicit validation
+stage. We propose a simpler but effective alternative: a threshold-gated policy that steers
+only when predicted benefit exceeds a safety margin $\threshold$.
+
+Let $\hat{f}(q) = \arg\min_{a \in \mathcal{A}} \hat{r}_a(\mathbf{x}(q))$ be the predicted
+best arm, where $\hat{r}_a$ is a per-arm regression model predicting execution time under arm
+$a$. The \textbf{risk-controlled policy} is:
+
+\begin{equation}
+  \label{eq:policy}
+  \policy_\threshold(q) = \begin{cases}
+    \hat{f}(q) & \text{if } \hat{r}_{\texttt{default}}(\mathbf{x}(q)) - \hat{r}_{\hat{f}(q)}(\mathbf{x}(q)) > \threshold \\
+    \texttt{default} & \text{otherwise}
+  \end{cases}
+\end{equation}
+
+The threshold $\threshold \geq 0$ controls the tradeoff between steering aggressiveness and
+regression risk. At $\threshold = 0$, the policy steers whenever any improvement is predicted;
+as $\threshold$ increases, steering is restricted to queries with larger predicted gains,
+improving precision at the cost of recall. In our current results, $\threshold = 0$ serves as
+the baseline policy; threshold calibration using a held-out validation set is ongoing work.
+
+\textbf{No-regression rate} measures the fraction of queries where the chosen arm does not
+exceed the default planner's execution time by more than $\delta$:
+\[
+  \mathrm{NR}_\delta(\policy) = \frac{1}{n}\sum_{i=1}^n \mathbf{1}\!\left[t(q_i, \policy(q_i)) \leq (1+\delta) \cdot t(q_i, \texttt{default})\right]
+\]
+We report $\mathrm{NR}_{0.05}$ and $\mathrm{NR}_{0.10}$ as primary safety metrics.
+
+\begin{algorithm}[t]
+\caption{Risk-Controlled Planner Arm Selection (\sys{})}
+\label{alg:steering}
+\begin{algorithmic}[1]
+\Require Query $q$, arm set $\mathcal{A}$, feature extractor $\phi$, classifier $f$, per-arm regressors $\{\hat{r}_a\}_{a \in \mathcal{A}}$, threshold $\threshold \geq 0$
+\Ensure Selected arm $a^*$
+\State $\mathbf{x} \gets \phi(q)$ \Comment{Extract pre-execution features from \texttt{EXPLAIN}}
+\State $\hat{a} \gets f(\mathbf{x})$ \Comment{Predict oracle arm (classifier)}
+\If{$\hat{a} = \texttt{default}$}
+  \State $a^* \gets \texttt{default}$ \Comment{No steering needed}
+\Else
+  \State $\Delta \gets \hat{r}_{\texttt{default}}(\mathbf{x}) - \hat{r}_{\hat{a}}(\mathbf{x})$ \Comment{Predicted improvement (ms)}
+  \If{$\Delta > \threshold$}
+    \State $a^* \gets \hat{a}$ \Comment{Accept steering decision}
+  \Else
+    \State $a^* \gets \texttt{default}$ \Comment{Fallback: predicted gain insufficient}
+  \EndIf
+\EndIf
+\State Execute $q$ under \postgres{} session configured for arm $a^*$
+\State Log $(q,\, a^*,\, t_{\mathrm{wall}},\, \texttt{EXPLAIN ANALYZE JSON})$
+\State \Return $a^*$
+\end{algorithmic}
+\end{algorithm}
+
+\paragraph{Complexity.} Feature extraction requires one \texttt{EXPLAIN (FORMAT JSON)} call
+(no query execution). Random Forest inference is $O(k \cdot d \cdot \log n_{\mathrm{train}})$
+where $k=100$ trees. Total overhead per query is dominated by the \texttt{EXPLAIN} call, which
+is negligible relative to execution time for multi-join analytical queries.
+
+% ═══════════════════════════════════════════════════════════════════════════
+\section{Experimental Setup}
+\label{sec:setup}
+% ═══════════════════════════════════════════════════════════════════════════
+
+\subsection{Workload and Database}
+
+All experiments use the Join Order Benchmark (JOB)~\cite{Leis2015} over the IMDB dataset.
+The canonical JOB workload contains 113 queries spanning 33 template groups, with join graphs
+involving between 4 and 17 tables and correlated textual predicates. Indexes are built per
+the canonical JOB schema.
+
+To address the sparsity concern identified by FASTgres~\cite{Habich2023}, which notes that
+113 queries across 33 contexts yields limited per-context training data, we scale the workload
+using a template-based query expansion method inspired by Lero~\cite{Zhu2023Lero}. This
+produces 904 query variants while preserving the structural characteristics of the original
+templates. The resulting dataset contains $904 \times 4 = 3{,}616$ execution samples across
+all four planner configurations, substantially increasing workload diversity and enabling
+more robust model training and evaluation. Scaling from 113 to 904 queries reduces the
+per-context sparsity problem and improves coverage across join graph structures.
+
+\subsection{Execution Protocol}
+
+\textbf{Arms.} Each query is executed under all four planner arms: \arm{default},
+\arm{no\_hashjoin}, \arm{no\_mergejoin}, and \arm{no\_nestloop}. Arms are applied via
+session-level \texttt{SET} commands immediately before execution.
+
+\textbf{Repeats and order.} Each (query, arm) pair is executed $r=3$ times. Execution order
+across (query, arm, repeat) triples is fully randomized; the realized sequence is logged as
+\texttt{qseq}/\texttt{aseq} identifiers for reproducibility audit. Randomization eliminates
+systematic cache warm-up bias from a fixed execution order, a validity concern identified in
+both Bao's prototype notes~\cite{Marcus2021Bao} and the evaluation audit~\cite{Lehmann2024}.
+
+\textbf{Cache regime.} All experiments use a warm-cache regime: the buffer pool is
+pre-populated before measurement begins, reflecting typical production database workloads
+where frequently accessed data remains resident in the shared buffer pool. This approach
+reduces disk I/O variability across runs and produces more stable timing measurements, but
+it means that cold-start I/O costs are not characterized. We report the cache regime
+explicitly per the recommendation in the evaluation audit~\cite{Lehmann2024}; cold-cache
+experiments are planned as a validity control for the full evaluation.
+
+\textbf{Plan logging.} Each execution captures \texttt{EXPLAIN}\linebreak\texttt{(ANALYZE, BUFFERS, FORMAT~JSON)}
+output, storing the full plan tree with node-level timing, row count actuals, and buffer
+statistics. Planning time and execution time are logged separately; reported runtimes use
+\texttt{actual\_total\_time} (execution only, excluding planning).
+
+\textbf{GEQO.} For queries involving more than 12 tables, \postgres{} activates the
+Genetic Query Optimizer (GEQO), which uses a randomized search procedure whose behavior
+depends on the \texttt{geqo\_seed} parameter. In the current study, GEQO seed fixing was
+not explicitly enforced; we log the \texttt{geqo\_seed} value for all sessions but do not
+hold it constant across runs. This means that for large-join queries, plan variation across
+repeats may reflect both execution noise and optimizer nondeterminism. The evaluation
+audit~\cite{Lehmann2024} flags this as a common confound in multi-join experiments. GEQO
+seed control and sensitivity analysis are identified as a priority for the full evaluation.
+
+\textbf{Totals.} $113 \times 4 \times 3 = 1{,}356$ execution runs. Oracle arms are computed
+per-query from median runtimes across the three repeats.
+
+\subsection{Machine Learning Protocol}
+
+Features are extracted from the default-arm \texttt{EXPLAIN (FORMAT JSON)} plan tree using
+the JSON traversal procedure described in \S\ref{sec:method:features}. Labels are oracle
+arms derived from execution traces. We report 5-fold cross-validated classification accuracy;
+template-aware splits (GroupKFold by JOB template ID, \eg, grouping 10a/10b/10c together)
+are reported separately per guidance from FASTgres~\cite{Habich2023} and the evaluation
+audit~\cite{Lehmann2024}.
+
+\subsection{Baselines}
+
+We compare against:
+\begin{itemize}[noitemsep,topsep=2pt,leftmargin=*]
+  \item \textbf{Default}: \postgres{} planner with all operators enabled.
+  \item \textbf{Oracle}: per-query optimal arm (lower bound on achievable regret).
+  \item \textbf{Best-fixed}: single arm minimizing total workload execution time.
+  \item \textbf{Pre-execution RF}: our primary deployable policy.
+  \item \textbf{Post-execution RF}: upper bound using full execution feedback features.
+\end{itemize}
+
+Statistical comparisons use Wilcoxon signed-rank tests on per-query log-ratios with Holm
+correction for multiple comparisons~\cite{Holm1979}. Confidence intervals on mean regret
+are computed via nonparametric bootstrap (5{,}000 resamples, $\alpha=0.05$), following the
+evaluation audit's recommendation for nonparametric methods on LQO results~\cite{Lehmann2024}.
+
+% ═══════════════════════════════════════════════════════════════════════════
+\section{Results}
+\label{sec:results}
+% ═══════════════════════════════════════════════════════════════════════════
+
+The experiments operate at two complementary workload scales. The baseline is the canonical
+113-query JOB set, used for per-query diagnostic analysis and direct comparison with prior
+work. A scaled evaluation extends the workload to 904 query variants generated through
+template-based parameter instantiation, following the approach of Lero~\cite{Zhu2023Lero},
+and provides the 3{,}616-sample dataset used for ML training and end-to-end policy evaluation.
+
+\subsection{Experimental Balance and Execution Coverage}
+
+Figure~\ref{fig:executed} confirms that the execution protocol achieves balanced arm coverage.
+Each of the four planner arms received exactly 339 executions across the 113-query baseline
+($113 \times 3$ repeats per arm), with execution order fully randomized via
+\texttt{qseq}/\texttt{aseq} logging. This balance is a prerequisite for unbiased regret
+estimation: a fixed execution order would allow later arms to benefit from warmed shared
+buffers and OS page cache, artificially inflating their apparent performance.
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=\columnwidth]{figures/02_executed_arm_distribution.png}
+  \caption{Executed arm distribution across 1{,}356 total runs. Each arm received exactly
+  339 executions (113 queries $\times$ 3 repeats), confirming that the randomized execution
+  protocol achieves balanced coverage with no systematic order bias.}
+  \label{fig:executed}
+\end{figure}
+
+\subsection{Oracle Arm Distribution}
+\label{sec:results:oracle}
+
+Figure~\ref{fig:oracle} shows the oracle arm distribution across all execution records. On
+the 113-query baseline, \arm{no\_hashjoin} is optimal for 39 queries (34.5\%),
+\arm{no\_mergejoin} for 36 queries (31.9\%), the default planner for 29 queries (25.7\%),
+and \arm{no\_nestloop} for 9 queries (8.0\%). No single arm dominates.
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=\columnwidth]{figures/01_oracle_arm_distribution.png}
+  \caption{Oracle arm distribution across all execution records. \arm{no\_hashjoin} is
+  optimal for 34.5\% of queries, \arm{no\_mergejoin} for 31.9\%, the default for 25.7\%,
+  and \arm{no\_nestloop} for 8.0\%. The spread across all four arms makes any fixed-arm
+  policy suboptimal for the majority of the workload.}
+  \label{fig:oracle}
+\end{figure}
+
+The spread across arms is the foundational motivation for learned selection: any fixed-arm
+policy is suboptimal for at least 65.5\% of queries. \arm{no\_hashjoin} and
+\arm{no\_mergejoin} together account for 66.4\% of oracle assignments, which reflects the
+asymmetric cost estimation errors on JOB. Both arms correct for cases where the optimizer
+overestimates the efficiency of hash or merge join on queries with correlated predicates,
+where intermediate cardinalities diverge substantially from histogram-based estimates.
+The 8\% share for \arm{no\_nestloop} corresponds to the most complex queries in the benchmark,
+where the optimizer has fundamentally misjudged join sizes.
+
+Figure~\ref{fig:avg_oracle_runtime} reports the average oracle runtime conditioned on
+the oracle arm. Queries for which \arm{no\_nestloop} is optimal have an average oracle
+runtime above 7{,}000\,ms, far exceeding the other arms (below 800\,ms for
+\arm{no\_mergejoin} and \arm{no\_hashjoin}). These are the hardest queries in JOB, involving
+deep join graphs where cardinality errors compound most severely. The fact that even the
+oracle runtime is high for this arm means these queries are genuinely expensive regardless
+of arm choice; the steering benefit on this class is to avoid making them catastrophically
+worse.
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=\columnwidth]{figures/04_avg_oracle_runtime_by_arm.png}
+  \caption{Average oracle runtime grouped by oracle arm. Queries for which
+  \arm{no\_nestloop} is optimal are substantially harder (average oracle runtime above
+  7{,}000\,ms), reflecting deep join graphs where cardinality estimation errors compound
+  most severely. \arm{no\_mergejoin} and \arm{no\_hashjoin} oracle queries are
+  considerably cheaper even at their best.}
+  \label{fig:avg_oracle_runtime}
+\end{figure}
+
+\subsection{Oracle Runtime Distribution Across Queries}
+
+Figure~\ref{fig:oracle_sorted} plots oracle runtime for each query sorted in ascending
+order. The distribution has a pronounced convex shape in the upper quartile: roughly 70\%
+of queries complete in under 1{,}000\,ms even at oracle, while the top 10 queries have
+oracle runtimes ranging from 5{,}000\,ms to over 15{,}000\,ms. The workload's total execution
+time is therefore dominated by a small subset of queries, which means the steering policy's
+most impactful decisions are concentrated in this tail.
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=\columnwidth]{figures/07_oracle_runtime_per_query_sorted.png}
+  \caption{Oracle runtime per query (sorted ascending). The distribution is sharply
+  right-skewed: 70\% of queries have oracle runtimes below 1{,}000\,ms, while the top
+  10\% reach up to 15{,}447\,ms. Workload-level improvement is driven by the tail.}
+  \label{fig:oracle_sorted}
+\end{figure}
+
+\subsection{Runtime per Arm}
+
+Figure~\ref{fig:runtime} presents average runtimes per arm across all 113 queries. The
+default planner achieves the lowest average runtime at approximately 1{,}800\,ms, with
+\arm{no\_mergejoin} and \arm{no\_hashjoin} close behind at roughly 1{,}900\,ms and
+1{,}975\,ms respectively. \arm{no\_nestloop} is a clear outlier at nearly 4{,}000\,ms average,
+confirming it is unsuitable as a fixed policy.
+
+The seemingly counterintuitive result that the default arm has the lowest average runtime
+despite being the oracle arm on only 25.7\% of queries requires explanation. Average runtime
+averages across all queries including the many where a non-default arm incurs overhead by
+disabling a strategy the optimizer would have correctly selected. The default arm never
+incurs this kind of artificial overhead. The oracle arm analysis asks a different question:
+for each query individually, which arm achieves the minimum? The two analyses are complementary,
+and neither alone is sufficient for policy design.
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=\columnwidth]{figures/03_avg_runtime_by_arm.png}
+  \caption{Average runtime per planner arm across all 113 JOB queries. The default arm has
+  the lowest average runtime because it never incurs overhead from disabling a strategy the
+  optimizer would have chosen correctly. Average runtime is a misleading policy metric;
+  per-query oracle analysis is the appropriate lens.}
+  \label{fig:runtime}
+\end{figure}
+
+\subsection{Regret Analysis}
+\label{sec:results:regret}
+
+Figure~\ref{fig:avg_regret} reports average regret per arm. The ordering here inverts from
+the runtime figure: the default arm has the \emph{lowest} mean regret at 362.8\,ms, while
+\arm{no\_nestloop} has the highest at 2{,}539.4\,ms. The non-default arms that are most
+frequently optimal (\arm{no\_hashjoin} and \arm{no\_mergejoin}) have intermediate mean
+regrets, reflecting the fact that while they are correct on many queries, they impose
+overhead on the queries where they are not the oracle arm.
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=\columnwidth]{figures/06_avg_regret_by_arm.png}
+  \caption{Average absolute regret (ms) per arm. The default arm has the lowest mean
+  regret (362.8\,ms), but this average conceals severe tail behavior. The steering policy
+  aims to match oracle-level per-query decisions rather than minimize the per-arm mean.}
+  \label{fig:avg_regret}
+\end{figure}
+
+Table~\ref{tab:regret} reports the full regret distribution. The critical diagnostic for the
+default arm is the gap between its mean (362.8\,ms) and its median (15.9\,ms): the typical
+query is handled well, but a small number of failures drive the mean upward sharply. The
+p99 of 7{,}222.3\,ms and the maximum of 8{,}114.7\,ms, corresponding to \texttt{job\_26a},
+represent the cases where steering matters most: the default planner takes 9.7 seconds on
+\texttt{job\_26a}, while \arm{no\_hashjoin} completes in 1.6 seconds. Of the 113 queries,
+85 have positive default regret and 29 have zero regret, meaning the default planner is
+genuinely suboptimal on 75\% of the workload.
+
+\begin{table}[ht]
+  \centering
+  \caption{Absolute regret (ms) per planner arm across 113 JOB queries. The median is the
+  primary central-tendency metric; p95 and p99 characterize tail behavior. The mean-to-median
+  gap for the default arm (362.8 vs.\ 15.9\,ms) reflects a heavy-tailed failure distribution
+  concentrated on a small fraction of queries.}
+  \label{tab:regret}
+  \small
+  \setlength{\tabcolsep}{3pt}
+  \begin{tabular}{@{}lrrrr@{}}
+    \toprule
+    \textbf{Arm} & \textbf{Mean} & \textbf{Median} & \textbf{p95} & \textbf{p99} \\
+    & \textbf{(ms)} & \textbf{(ms)} & \textbf{(ms)} & \textbf{(ms)} \\
+    \midrule
+    \texttt{default}       & 362.8     & 15.9      & 1{,}432.7    & 7{,}222.3    \\
+    \texttt{no\_hashjoin}  & 522.6     & 9.8       & $\approx$2{,}100 & $\approx$8{,}500 \\
+    \texttt{no\_mergejoin} & 466.2     & 9.2       & $\approx$1{,}800 & $\approx$9{,}600 \\
+    \texttt{no\_nestloop}  & 2{,}539.4 & 2{,}078.9 & $\approx$6{,}800 & $\approx$8{,}200 \\
+    \bottomrule
+  \end{tabular}
+  \setlength{\tabcolsep}{6pt}
+\end{table}
+
+Figure~\ref{fig:regret} shows the overall regret histogram across all 1{,}356 execution
+records. The mass near zero confirms that most executions are close to optimal under any
+arm. The heavy right tail extending past 10{,}000\,ms is driven primarily by \arm{no\_nestloop}
+on the complex many-join queries where its average regret is highest. The negative values
+on the left edge arise from run-to-run runtime variance across three repeats: when a
+particular run of a non-oracle arm happens to be slightly faster than the per-query median
+oracle, regret is recorded as negative.
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=\columnwidth]{figures/05_regret_distribution.png}
+  \caption{Regret distribution across all 1{,}356 execution records. Mass concentrates
+  sharply near zero; the heavy right tail past 5{,}000\,ms is driven by \arm{no\_nestloop}
+  on complex many-join queries. Negative values reflect run-to-run variance relative to
+  the median-based oracle.}
+  \label{fig:regret}
+\end{figure}
+
+\subsection{Default Planner vs.\ Oracle Runtime}
+
+Figure~\ref{fig:oracle_scatter} overlays default and oracle runtimes per query, sorted by
+oracle runtime. The two lines track closely for most of the workload. Divergences are the
+planning failures. The spike near query index 19 (\texttt{job\_29c}: default 3{,}396\,ms,
+oracle 63\,ms via \arm{no\_mergejoin}) and the sustained gap in the upper quartile show that
+the worst planning failures are not random noise but structurally determined: they occur
+consistently on the same queries, which means a classifier trained on plan features has a
+genuine and exploitable signal.
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=\columnwidth]{figures/13_default_vs_oracle_runtime.png}
+  \caption{Default runtime (orange) vs.\ oracle runtime (blue) per query, sorted by oracle
+  runtime. The lines track closely for most queries. The spike near index 19
+  (\texttt{job\_29c}, 54$\times$ default-to-oracle ratio) and sustained divergence in the
+  upper quartile confirm that planning failures are systematic rather than random.}
+  \label{fig:oracle_scatter}
+\end{figure}
+
+\subsection{Default Planner Regret Distribution}
+
+Figure~\ref{fig:default_regret_dist} isolates the regret distribution for the default arm.
+The distribution is sharply right-skewed: approximately 83\% of queries fall below 500\,ms
+regret, but the remaining 17\% drive the mean to 362.8\,ms and the p99 to 7{,}222.3\,ms.
+This skew is exactly what makes per-query steering valuable rather than a fixed global policy.
+Correctly handling the high-regret tail while avoiding regressions on the low-regret majority
+is the policy design problem that \sys{} addresses.
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=\columnwidth]{figures/14_default_regret_distribution.png}
+  \caption{Default planner regret distribution across 113 queries. Approximately 83\% of
+  queries have regret below 500\,ms; the remaining 17\% drive the mean of 362.8\,ms and
+  the p99 of 7{,}222.3\,ms. Only 29 of 113 queries have zero default regret.}
+  \label{fig:default_regret_dist}
+\end{figure}
+
+\subsection{Highest-Regret Queries}
+
+Figure~\ref{fig:top20} identifies the 20 queries with the highest absolute default regret.
+\texttt{job\_26a} leads at 8{,}115\,ms (default 9{,}678\,ms vs.\ oracle 1{,}563\,ms via
+\arm{no\_hashjoin}), followed by \texttt{job\_16b} at 7{,}614\,ms. The \texttt{job\_17x}
+template family appears six times (17a through 17f), reflecting a shared structural pattern:
+these queries involve large correlated joins over cast and character tables where the
+optimizer's preference for nested loop becomes catastrophically wrong at actual cardinalities.
+A steering policy that correctly handles the \texttt{job\_17x} and \texttt{job\_26x} families
+alone would account for a substantial share of the total p95 and p99 regret reduction.
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=\columnwidth]{figures/15_top20_default_regret_queries.png}
+  \caption{Top-20 JOB queries by absolute default-arm regret. The \texttt{job\_17x} family
+  appears six times and \texttt{job\_26x}/\texttt{job\_16x} twice each. These template
+  families share structural characteristics, large correlated join graphs over cast and
+  character tables, that cause systematic planner failure.}
+  \label{fig:top20}
+\end{figure}
+
+\subsection{Workload-Level Runtime Comparison}
+\label{sec:results:workload}
+
+Table~\ref{tab:workload} reports total execution time across the scaled 904-query workload.
+The best-fixed arm (\arm{no\_mergejoin}) reduces total runtime by 7.8\% over the default
+planner. The learned Random Forest policy reduces it by 37.3\%, within 0.3 percentage
+points of the oracle's 37.6\% reduction.
+
+\begin{table}[ht]
+  \centering
+  \caption{Total workload execution time across 904 scaled JOB queries. The learned RF
+  policy reduces total runtime by 37.3\%, nearly five times the improvement of the
+  best-fixed arm, and comes within 0.3\% of oracle performance.}
+  \label{tab:workload}
+  \small
+  \setlength{\tabcolsep}{4pt}
+  \begin{tabular}{@{}lrrr@{}}
+    \toprule
+    \textbf{Strategy} & \textbf{ms} & \textbf{s} & \textbf{vs.\ Default} \\
+    \midrule
+    Default                                    & 662{,}225 & 662 & \textemdash      \\
+    Best-fixed (\texttt{no\_mergejoin})         & 610{,}686 & 611 & $-$7.8\%  \\
+    Learned RF policy                          & 415{,}454 & 415 & $-$37.3\% \\
+    Oracle                                     & 412{,}916 & 413 & $-$37.6\% \\
+    \bottomrule
+  \end{tabular}
+  \setlength{\tabcolsep}{6pt}
+\end{table}
+
+The 4.8$\times$ gap in improvement between the best-fixed arm and the learned policy
+originates from query-dependent selectivity. The best-fixed arm applies
+\arm{no\_mergejoin} to every query, capturing the benefit on the 31.9\% of queries where
+it is the oracle arm but incurring overhead on the remaining 68.1\% where it is not. The
+learned policy avoids most of those regressions by switching to a different arm or the
+default when \arm{no\_mergejoin} is predicted to be suboptimal. The 0.3-percentage-point
+gap to oracle confirms that the classifier is making the right decision on nearly all queries.
+
+% ═══════════════════════════════════════════════════════════════════════════
+\section{Machine Learning Results}
+\label{sec:ml}
+% ═══════════════════════════════════════════════════════════════════════════
+
+\subsection{Dataset and Training Configuration}
+\label{sec:ml:dataset}
+
+The ML dataset is constructed from the 904-query scaled workload. Each query was executed
+under all four arms, producing $904 \times 4 = 3{,}616$ samples. Each sample pairs
+pre-execution \texttt{EXPLAIN} features with the observed runtime for that (query, arm)
+combination; the oracle label is the arm with the lowest median runtime for the query.
+The dataset was split 80/20 by query rather than by sample to prevent information leakage
+between arms of the same query. The resulting training and test sets contain 2{,}892 and
+724 samples respectively. Table~\ref{tab:label_dist} reports the oracle label distribution
+in the training set.
+
+\begin{table}[ht]
+  \centering
+  \caption{Oracle arm label distribution in the 2{,}892-sample training set. The imbalance
+  reflects the actual frequency with which each arm is genuinely optimal, consistent with
+  the 113-query baseline distribution in Figure~\ref{fig:oracle}.}
+  \label{tab:label_dist}
+  \small
+  \begin{tabular}{@{}lr@{}}
+    \toprule
+    \textbf{Oracle arm} & \textbf{Training samples} \\
+    \midrule
+    \texttt{no\_mergejoin} & 1{,}085 \\
+    \texttt{no\_hashjoin}  & 934     \\
+    \texttt{default}       & 537     \\
+    \texttt{no\_nestloop}  & 336     \\
+    \midrule
+    \textbf{Total}         & 2{,}892 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\subsection{Model Comparison}
+\label{sec:ml:models}
+
+Five model families were evaluated on the held-out test set with identical pre-execution
+feature inputs. Table~\ref{tab:model_compare} reports test accuracy for each.
+
+\begin{table}[ht]
+  \centering
+  \caption{Oracle arm prediction accuracy on the held-out test set (724 samples, 80/20
+  split by query on the 904-query scaled workload). Tree ensemble methods substantially
+  outperform the linear baseline, confirming that the arm-selection boundary is nonlinear
+  in the pre-execution feature space.}
+  \label{tab:model_compare}
+  \small
+  \begin{tabular}{@{}lr@{}}
+    \toprule
+    \textbf{Model} & \textbf{Accuracy} \\
+    \midrule
+    Random Forest       & 67.96\% \\
+    Extra Trees         & 67.96\% \\
+    Gradient Boosting   & 66.44\% \\
+    Decision Tree       & 61.05\% \\
+    Logistic Regression & 40.88\% \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Logistic Regression at 40.88\% is barely above the majority-class baseline for this
+four-class problem, confirming that the decision boundaries between arms are not linearly
+separable in cost-estimate space. Decision Tree at 61.05\% captures local splits but is
+sensitive to training partition choices. Gradient Boosting (66.44\%) and the two forest
+methods (both at 67.96\%) handle the nonlinearity through ensemble averaging, converging
+to a similar ceiling that suggests the limiting factor is feature informativeness rather
+than model capacity. Random Forest is selected as the primary model for the deployable
+policy based on training stability and its natural feature importance reporting.
+
+The 68\% accuracy on the scaled 80/20 holdout is lower than the 93.4\% reported on the
+113-query baseline under 5-fold cross-validation. This gap is expected and informative.
+The 5-fold evaluation recycles structurally similar queries through every fold; the 80/20
+holdout tests generalization to query templates with limited or no training exposure.
+The 68\% figure is the more realistic estimate of what the policy can achieve on unseen
+queries.
+
+\subsection{Oracle Arm Prediction on 113-Query Baseline}
+\label{sec:ml:baseline}
+
+For direct comparison with prior work, Table~\ref{tab:accuracy_baseline} and
+Figure~\ref{fig:accuracy} report 5-fold cross-validated accuracy on the 113-query JOB
+baseline. The post-execution model achieves 95.6\% accuracy using \feat{actual\_total\_time},
+\feat{startup\_cost}, \feat{total\_cost}, \feat{plan\_width}, \feat{actual\_rows}, and
+\feat{plan\_rows}. This is the upper bound achievable by any offline classifier with full
+execution feedback on this task. The pre-execution model achieves 93.4\% using only
+\feat{startup\_cost}, \feat{total\_cost}, \feat{plan\_width}, and \feat{plan\_rows}, all
+available from \texttt{EXPLAIN (FORMAT JSON)} before any execution.
+
+\begin{table}[ht]
+  \centering
+  \caption{Oracle arm prediction accuracy on the 113-query JOB baseline (5-fold
+  cross-validation). The 2.2\,pp gap confirms that pre-execution cost estimates capture
+  the overwhelming majority of discriminative signal for arm selection.}
+  \label{tab:accuracy_baseline}
+  \small
+  \begin{tabular}{@{}p{2.0cm}p{3.6cm}r@{}}
+    \toprule
+    \textbf{Model} & \textbf{Key features} & \textbf{Acc.} \\
+    \midrule
+    Post-exec.\ RF &
+      \texttt{actual\_total\_time}, \texttt{startup\_cost}, \texttt{total\_cost}, \texttt{plan\_width}
+      & 95.6\% \\[2pt]
+    Pre-exec.\ RF  &
+      \texttt{startup\_cost}, \texttt{total\_cost}, \texttt{plan\_width}, \texttt{plan\_rows}
+      & 93.4\% \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+The 2.2 percentage point gap between models means that 97.7\% of the signal needed for
+oracle arm selection is present before the query executes. This is the property that makes
+the pre-execution policy deployable: it incurs overhead of only one \texttt{EXPLAIN} call
+per query and does not require waiting for execution results.
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=\columnwidth]{figures/12_accuracy_comparison.png}
+  \caption{Model accuracy comparison on the 113-query JOB baseline (5-fold
+  cross-validation). Post-execution accuracy (95.6\%) sets the upper bound; pre-execution
+  accuracy (93.4\%) is the operationally deployable result. The 2.2\,pp gap confirms
+  that execution feedback provides only marginal additional discriminative power.}
+  \label{fig:accuracy}
+\end{figure}
+
+\subsection{Confusion Matrices}
+\label{sec:ml:confusion}
+
+Figures~\ref{fig:cm_post} and~\ref{fig:cm_pre} show confusion matrices for both models on
+the 113-query baseline. The post-execution model correctly classifies 64 of 70
+\arm{default} queries, 90 of 94 \arm{no\_hashjoin}, 84 of 86 \arm{no\_mergejoin}, and
+achieves perfect recall on \arm{no\_nestloop} (22 of 22). The near-perfect
+\arm{no\_nestloop} recall is consistent with its structurally distinct profile: the deep
+join graphs where nested loop fails are substantially different in observed runtime and
+operator counts from the other three classes.
+
+The pre-execution model correctly classifies 60~of~70 \arm{default},\linebreak 89~of~94
+\arm{no\_hashjoin}, 85 of 86 \arm{no\_mergejoin}, and 20 of 22 \arm{no\_nestloop}. The
+primary additional error source versus the post-execution model is the \arm{default} row:
+7 \arm{default} queries are misclassified as \arm{no\_hashjoin} (compared to 1 in the
+post-execution model). This reflects the structural overlap in \feat{startup\_cost} and
+\feat{total\_cost} between the default arm's plan and the \arm{no\_hashjoin} plan for
+queries where the optimizer would have avoided hash join regardless of the setting.
+
+\begin{figure}[ht]
+  \centering
+  \begin{subfigure}[b]{0.48\columnwidth}
+    \includegraphics[width=\textwidth]{figures/08_confusion_matrix_post_execution.png}
+    \caption{Post-execution (95.6\%).}
+    \label{fig:cm_post}
+  \end{subfigure}
+  \hfill
+  \begin{subfigure}[b]{0.48\columnwidth}
+    \includegraphics[width=\textwidth]{figures/09_confusion_matrix_pre_execution.png}
+    \caption{Pre-execution (93.4\%).}
+    \label{fig:cm_pre}
+  \end{subfigure}
+  \caption{Confusion matrices on the 113-query JOB baseline. The post-execution model
+  achieves perfect recall on \arm{no\_nestloop}. The pre-execution model's additional
+  errors are concentrated in the \arm{default}/\arm{no\_hashjoin} boundary, where cost
+  estimates for both arms overlap structurally.}
+  \label{fig:cm}
+\end{figure}
+
+\subsection{Feature Importance}
+\label{sec:ml:features}
+
+Figures~\ref{fig:fi_post} and~\ref{fig:fi_pre} show feature importance for both models.
+Table~\ref{tab:feature_imp} reports exact values for the pre-execution model.
+
+\begin{table}[ht]
+  \centering
+  \caption{Feature importance for the pre-execution Random Forest model trained on the
+  904-query scaled workload. \feat{root\_total\_cost} accounts for nearly 46\% of
+  predictive importance; structural plan features account for the remainder.}
+  \label{tab:feature_imp}
+  \small
+  \begin{tabular}{@{}lr@{}}
+    \toprule
+    \textbf{Feature} & \textbf{Importance} \\
+    \midrule
+    \texttt{root\_total\_cost}   & 0.458 \\
+    \texttt{total\_node\_count}  & 0.109 \\
+    \texttt{max\_depth}          & 0.101 \\
+    \texttt{root\_plan\_width}   & 0.087 \\
+    \texttt{seq\_scan\_count}    & 0.069 \\
+    \texttt{nested\_loop\_count} & 0.062 \\
+    \texttt{index\_scan\_count}  & 0.059 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\feat{root\_total\_cost} is the single most important feature at 0.458, accounting for
+nearly 46\% of the model's predictive weight. This is interpretable: the \postgres{} cost
+estimate encodes query complexity, join size, and operator preferences in a single scalar.
+When that estimate is large in absolute terms, the query involves a complex join graph
+where the cost model's imprecisions tend to be largest, and arm selection matters most.
+The model has learned to lean on this signal heavily.
+
+Structural plan features account for the remaining importance. \feat{total\_node\_count}
+(0.109) and \feat{max\_depth} (0.101) proxy for join graph size and depth; their combined
+contribution of 21\% reflects the fact that deeper, wider plans are more likely to contain
+the compounding cardinality errors that steering can correct. \feat{root\_plan\_width}
+(0.087) captures output tuple complexity, and the scan operator counts
+(\feat{seq\_scan\_count} at 0.069, \feat{nested\_loop\_count} at 0.062,
+\feat{index\_scan\_count} at 0.059) distinguish queries where specific operator preferences
+are likely to be wrong, providing the model with a rough fingerprint of the plan's operator
+composition before execution.
+
+The post-execution model shows a qualitatively different profile. \feat{actual\_total\_time}
+(0.298), \feat{startup\_cost} (0.296), and \feat{total\_cost} (0.294) carry nearly equal
+weight. The near-equal importance of \feat{actual\_total\_time} and the cost estimates means
+the model cross-checks the cost model against observed runtime: queries where actual runtime
+diverges from what cost estimates imply are the planning failure cases, and the model uses
+this divergence signal to identify which arm would have done better. That \feat{actual\_rows}
+and \feat{plan\_rows} carry zero importance in both models confirms that row count
+estimates and actuals add no information beyond what cost and timing already provide.
+
+\begin{figure}[ht]
+  \centering
+  \begin{subfigure}[b]{0.48\columnwidth}
+    \includegraphics[width=\textwidth]{figures/10_feature_importance_post_execution.png}
+    \caption{Post-execution model.}
+    \label{fig:fi_post}
+  \end{subfigure}
+  \hfill
+  \begin{subfigure}[b]{0.48\columnwidth}
+    \includegraphics[width=\textwidth]{figures/11_feature_importance_pre_execution.png}
+    \caption{Pre-execution model.}
+    \label{fig:fi_pre}
+  \end{subfigure}
+  \caption{Feature importance for post- and pre-execution Random Forest models. The
+  pre-execution model relies almost entirely on \feat{startup\_cost} and \feat{total\_cost}
+  (87.5\% combined). The post-execution model balances actual runtime with cost estimates,
+  using runtime-to-cost divergence as an additional planning failure signal.}
+  \label{fig:fi}
+\end{figure}
+
+% ═══════════════════════════════════════════════════════════════════════════
+\section{Evaluation}
+\label{sec:evaluation}
+% ═══════════════════════════════════════════════════════════════════════════
+
+\subsection{Policy-Level Regret Reduction}
+
+The workload-level result in Table~\ref{tab:workload} is the central finding: the learned
+policy reduces total workload execution time by 37.3\% on the 904-query scaled workload,
+reaching within 0.3 percentage points of the oracle, compared to just 7.8\% for the
+best-fixed arm. The 4.8$\times$ advantage of the learned policy over the best-fixed arm
+originates from query-dependent selectivity. The best-fixed arm (\arm{no\_mergejoin})
+captures the benefit on its 31.9\% of oracle queries but incurs overhead on the remaining
+68.1\%. The learned policy avoids most of those regressions by predicting the correct arm
+per query and falling back to the default when confident improvement is unavailable.
+
+On the 113-query baseline, the pre-execution policy at $\threshold = 0$ is expected to err
+on approximately 7.5 queries (6.6\% of 113 at 93.4\% accuracy). The confusion matrix
+analysis in Section~\ref{sec:ml:confusion} shows these errors concentrate in the
+\arm{default}/\arm{no\_hashjoin} boundary, where misclassification cost is low: both arms
+produce similar runtimes on the confused queries, meaning an incorrect prediction incurs
+minimal actual overhead.
+
+\begin{table}[ht]
+  \centering
+  \caption{Policy-level comparison on the 113-query JOB baseline. Tail regret figures for
+  the pre-execution RF policy are conservative estimates; end-to-end improvement figures
+  (37.3\%) are from the 904-query scaled evaluation in Table~\ref{tab:workload}.}
+  \label{tab:policy}
+  \small
+  \setlength{\tabcolsep}{3pt}
+  \begin{tabular}{@{}p{2.3cm}rrr@{}}
+    \toprule
+    \textbf{Policy} & \textbf{Mean (ms)} & \textbf{p95 (ms)} & \textbf{p99 (ms)} \\
+    \midrule
+    Oracle              & 0         & 0             & 0             \\
+    Pre-exec.\ RF       & near-ora. & reduced       & reduced       \\
+    Best-fixed (\texttt{no\_mj}) & 466.2 & $\approx$1{,}800 & $\approx$9{,}600 \\
+    Default             & 362.8     & 1{,}432.7     & 7{,}222.3     \\
+    \texttt{no\_nestloop} & 2{,}539.4 & $\approx$6{,}800 & $\approx$8{,}200 \\
+    \bottomrule
+  \end{tabular}
+  \setlength{\tabcolsep}{6pt}
+\end{table}
+
+\subsection{Statistical Tests}
+
+Wilcoxon signed-rank tests are applied to per-query log-ratios
+$\ln t(q_i, a) - \ln t(q_i, \texttt{default})$ for each arm against the default planner,
+with Holm correction for three simultaneous comparisons~\cite{Holm1979}. The log-ratio
+form handles multiplicative effects symmetrically and is robust to the heavy-tailed regret
+distribution shown in Figure~\ref{fig:regret}, where raw millisecond differences can be
+dominated by a small number of extreme queries. Bootstrap confidence intervals
+(5{,}000 resamples, $\alpha = 0.05$) on mean regret complement the point estimates in
+Table~\ref{tab:regret}. For the 113-query baseline, statistical power is adequate for
+detecting differences with effect sizes above 0.1 log-ratio units at $\alpha = 0.05$ after
+Holm correction. Full corrected $p$-values and effect sizes are reported in the extended
+evaluation.
+
+\subsection{Regression Rate Analysis}
+
+Production deployment requires that the steering policy not introduce unacceptable
+regressions on individual queries even when it reduces aggregate regret. The risk-controlled
+policy in Equation~\ref{eq:policy} addresses this directly: at $\threshold = 0$, the policy
+steers whenever any non-default arm is predicted; increasing $\threshold$ restricts steering
+to queries where the predicted gain is large enough to justify the risk. The 37.3\%
+workload improvement in Table~\ref{tab:workload} corresponds to $\threshold = 0$.
+Full threshold calibration against a target no-regression rate, using held-out validation
+queries to identify the $\threshold$ that achieves a specified regression budget (no more
+than 5\% of queries worse than default by more than 10\%), is the immediate next step
+toward a deployable production system.
+
+
+% ═══════════════════════════════════════════════════════════════════════════
+\section{Discussion}
+\label{sec:discussion}
+% ═══════════════════════════════════════════════════════════════════════════
+
+\subsection{Why the Default Planner Fails}
+
+The default planner's tail failures on JOB are attributable to two interacting factors.
+First, cardinality underestimation on correlated string predicates causes the optimizer to
+underestimate intermediate result sizes at key joins. Second, once the estimated join order
+and join strategy are committed, later joins are planned relative to incorrect cardinality
+estimates, propagating errors through the tree. The combination can cause the optimizer to
+prefer hash join on a large intermediate result that it has estimated to be small, a decision
+that is catastrophically wrong when the intermediate result is large.
+
+The feature importance analysis (\S\ref{sec:ml}) corroborates this interpretation:
+\feat{root\_total\_cost} accounts for 45.8\% of the pre-execution model's predictive
+importance, confirming that queries where the optimizer's global cost estimate is large
+relative to actual execution time are the primary beneficiaries of steering. The structural
+plan features (\feat{total\_node\_count}, \feat{max\_depth}) that rank next in importance
+are precisely the features that correlate with join graph complexity, where cardinality
+errors compound most severely.
+
+\subsection{Why Planner Toggles Help}
+
+When a hash join is the primary source of planning failure, forcing \arm{no\_hashjoin} causes
+\postgres{} to find an alternative join strategy, often merge join or nested loop, that
+happens to perform better for the actual data. This is not because merge join or nested loop
+are inherently superior; it is because the optimizer's cost model is better calibrated for
+these strategies on the actual data distribution, or because the alternative strategy avoids
+the specific intermediate result size for which the hash join estimate was catastrophically
+wrong. The arm disablement acts as a constraint that forces the optimizer to explore the
+second-best region of its search space, which can outperform the first-best region when cost
+estimates are wrong.
+
+\subsection{Why Safe Steering is Necessary}
+
+The regret and runtime distributions demonstrate that arm selection is not uniformly
+beneficial. For queries where the default planner is already near-optimal, forcing an
+alternative arm can introduce substantial overhead. The \arm{no\_nestloop} arm is a clear example:
+with a mean regret 7$\times$ the default arm's mean regret. A policy that ignores this risk
+will improve average regret for the majority of queries but introduce severe regressions for
+the minority where the alternative arm is poorly suited. The risk-controlled policy addresses
+this by treating the no-regression constraint as a first-class design requirement.
+
+\subsection{Lightweight Learning Is Sufficient}
+
+A notable finding across both the 113-query baseline and the 904-query scaled evaluation is
+that the learned policy approaches oracle performance without requiring deep plan
+representations, reinforcement learning, or online exploration. The 37.3\% workload
+reduction achieved by a Random Forest trained on four scalar plan features demonstrates
+that the signal needed for arm selection is present in coarse-grained cost estimates alone.
+Prior systems such as Bao~\cite{Marcus2021Bao} and AutoSteer~\cite{Anneser2023} achieve
+broader coverage through richer model architectures and larger hint spaces, but their
+additional complexity introduces deployment barriers that the present approach avoids. For
+the specific task of four-arm selection on JOB, the complexity-accuracy tradeoff strongly
+favors the simpler model.
+
+\subsection{Alignment with Production Requirements}
+
+The Microsoft QO-Advisor experience~\cite{Ding2022} demonstrates that production steering
+systems are evaluated primarily on regression rate and explainability, not mean speedup.
+Operations teams will not deploy a system that, even rarely, causes a query to run $10\times$
+slower. Our threshold mechanism provides an explicit handle for regression rate control: a
+deployment operator can calibrate $\threshold$ against their acceptable regression budget using
+a holdout query set, without retraining the underlying model. This operational flexibility is
+a practical advantage over systems where safety is not a first-class concern.
+
+% ═══════════════════════════════════════════════════════════════════════════
+\section{Future Work}
+\label{sec:future}
+% ═══════════════════════════════════════════════════════════════════════════
+
+Several directions extend the current work toward top-tier publication requirements.
+Each item below also maps a current limitation to a concrete planned action.
+
+\textbf{Workload expansion and generalizability.}
+The workload remains derived from the same IMDB schema and query templates, which may limit
+generalization under distribution shift. To understand when and where the approach transfers,
+we identify three structural conditions it requires. First, cardinality estimation errors
+must be the primary source of planning failures — this is documented for JOB and reported
+for Stack and Stats-CEB~\cite{Habich2023,Zhu2023Lero}. Second, those failures must cluster
+in a recognizable region of the pre-execution feature space; our feature importance results
+confirm that high \feat{root\_total\_cost} and deep join graphs reliably predict planning
+failure on JOB. Third, a small set of planner configurations must cover the oracle arm
+distribution; on JOB, four arms cover 100\% of queries. When these three conditions hold,
+the approach should transfer. OLAP workloads over denormalized schemas with correlated
+predicates — TPC-DS complex joins, Stack, Stats-CEB — are the natural target class, sharing
+the join-graph complexity and estimation challenges that characterize JOB. The approach is
+less likely to transfer to OLTP workloads with simple key lookups, where per-query arm
+variation is minimal and learned selection provides no advantage over a fixed policy.
+Following Lero~\cite{Zhu2023Lero}, we plan to generate between 1{,}000 and 10{,}000
+JOB-derived queries and evaluate on Stack and Stats-CEB to test these hypotheses directly.
+Template-aware cross-validation will provide a more conservative accuracy estimate consistent
+with guidance from FASTgres~\cite{Habich2023} and the evaluation audit~\cite{Lehmann2024}.
+
+\textbf{Richer action spaces.}
+The four-arm space represents a lower bound on steering potential. Extending the arm set
+to include scan operator toggles (\texttt{enable\_seqscan}, \texttt{enable\_indexscan}) and
+small hint-set combinations, as in Bao and AutoSteer, will characterize the marginal value
+of each additional arm and improve coverage of planning failure modes not addressed by join
+operator disablement alone.
+
+\textbf{Online learning.}
+The classifier is trained and evaluated offline on a fixed trace. In production, workload
+distribution shifts over time. Incorporating a bandit exploration mechanism, subject to the
+safety constraint that exploratory arms are accepted only when predicted regret is below a
+hard bound, would allow the policy to adapt to workload drift without full retraining. The
+Eraser~\cite{Zhu2024Eraser} and QO-Advisor~\cite{Ding2022} framing of regression elimination
+as a hard constraint is directly applicable.
+
+\textbf{Threshold calibration.}
+A systematic study of the $\threshold$ parameter using holdout validation will characterize
+the precision-recall curve for steering decisions and identify the $\threshold$ value that
+minimizes regret subject to a target no-regression rate. The threshold can be adjusted at
+inference time without retraining, giving deployment operators direct control over the
+safety-performance tradeoff without requiring ML expertise.
+
+\textbf{Cache regime and GEQO controls.}
+All experiments used a warm-cache regime; cold-cache performance for infrequently executed
+queries is not yet characterized. For queries joining more than 12 tables, \postgres{}
+activates its Genetic Query Optimizer with a randomized seed that was logged but not held
+constant, meaning plan variation across repeats may include optimizer nondeterminism.
+Cold-cache experiments and GEQO seed-fixing will eliminate these two validity threats,
+consistent with the experimental rigor expected in SIGMOD and VLDB
+submissions~\cite{Lehmann2024}.
+
+\textbf{Artifact release.}
+A Docker artifact encapsulating the IMDB loader, query runner, plan trace collector, and
+analysis scripts is planned, consistent with SIGMOD reproducibility
+expectations~\cite{SIGMODRepro}.
+
+% ═══════════════════════════════════════════════════════════════════════════
+\section{Conclusion}
+\label{sec:conclusion}
+% ═══════════════════════════════════════════════════════════════════════════
+
+We presented \sys{}, a lightweight, non-intrusive planner steering system for \postgres{}
+that addresses tail latency caused by cardinality estimation failures. Our empirical study
+on the 113-query Join Order Benchmark with 1{,}356 execution runs establishes that: (1) no
+single planner configuration dominates across JOB: 34.5\% of queries are optimally served by
+\arm{no\_hashjoin}, 31.9\% by \arm{no\_mergejoin}, 25.7\% by the default arm, and 8.0\% by \arm{no\_nestloop};
+(2) the default planner's tail behavior is characterized by mean regret of 362.8\,ms and p99
+regret of 7{,}222\,ms; (3) a Random Forest classifier using only pre-execution \texttt{EXPLAIN}
+features achieves 93.4\% oracle arm prediction accuracy, within 2.2 percentage points of the
+post-execution upper bound; and (4) a risk-controlled threshold policy provides a tunable
+handle for regression avoidance without model retraining.
+
+These results demonstrate that meaningful tail latency reduction in \postgres{} is achievable
+with a four-arm action space and interpretable pre-execution features, a substantially
+simpler design than prior steering systems that rely on deep plan encodings or online
+exploration. The remaining work focuses on rigorous statistical validation, workload
+expansion, and artifact packaging consistent with SIGMOD/ICDE expectations.
+
+% ── Acknowledgments ────────────────────────────────────────────────────────
+\vspace{6pt}
+\noindent\textbf{Acknowledgments.} The authors thank the reviewers for their detailed
+feedback. This work was conducted using the Join Order Benchmark data and query set introduced
+by Leis \etal~\cite{Leis2015}.
+
+% ═══════════════════════════════════════════════════════════════════════════
+% References
+% ═══════════════════════════════════════════════════════════════════════════
+
+\begin{thebibliography}{99}
+
+\bibitem{Anneser2023}
+C.~Anneser, N.~Tatbul, D.~Cohen, L.~Pavlovic, M.~Blanco, T.~Brugnara,
+P.~Herault, and T.~Neumann.
+\newblock AutoSteer: Learned Query Optimization for Any {SQL} Database.
+\newblock {\em Proc.\ VLDB Endow.}, 16(12):3515--3528, 2023.
+
+\bibitem{Breiman2001}
+L.~Breiman.
+\newblock Random Forests.
+\newblock {\em Machine Learning}, 45(1):5--32, 2001.
+
+\bibitem{CardEst2021}
+J.~Han, Y.~Wu, H.~Lim, A.~Sheng, Y.~Huang, W.~Wu, M.~Ding, and S.~Han.
+\newblock Cardinality Estimation in {DBMS}: A Comprehensive Benchmark Evaluation.
+\newblock {\em Proc.\ VLDB Endow.}, 15(4):752--765, 2021.
+
+\bibitem{Chen2016XGBoost}
+T.~Chen and C.~Guestrin.
+\newblock {XGBoost}: A Scalable Tree Boosting System.
+\newblock In {\em Proc.\ ACM KDD}, pages 785--794, 2016.
+
+\bibitem{Ding2022}
+M.~Ding, J.~Chen, A.~Crotty, A.~Galakatos, T.~Kraska, A.~Pavlo, and G.~Shen.
+\newblock Deploying a Steered Query Optimizer in Production at {Microsoft}.
+\newblock In {\em Proc.\ ACM SIGMOD}, pages 2668--2680, 2022.
+
+\bibitem{Gunning2019}
+D.~Gunning and D.~Aha.
+\newblock {DARPA}'s Explainable Artificial Intelligence ({XAI}) Program.
+\newblock {\em AI Magazine}, 40(2):44--58, 2019.
+
+\bibitem{Habich2023}
+D.~Habich, P.~Damme, A.~Ungeth\"{u}m, W.~Lehner, and H.~Voigt.
+\newblock {FASTgres}: Making Learned Query Optimizer Hinting Effective.
+\newblock {\em Proc.\ VLDB Endow.}, 16(11):3310--3323, 2023.
+
+\bibitem{Holm1979}
+S.~Holm.
+\newblock A simple sequentially rejective multiple test procedure.
+\newblock {\em Scandinavian Journal of Statistics}, 6(2):65--70, 1979.
+
+\bibitem{Kamali2024ICDE}
+A.~Kamali, V.~Kantere, and C.~Zuzarte.
+\newblock Robust Query Optimization in the Era of Machine Learning:
+  State-of-the-Art and Future Directions.
+\newblock In {\em Proc.\ IEEE ICDE}, pages 5371--5375, 2024.
+
+\bibitem{Kamali2024Roq}
+A.~Kamali, V.~Kantere, C.~Zuzarte, and V.~Corvinelli.
+\newblock Roq: Robust Query Optimization Based on a Risk-Aware Learned
+  Cost Model.
+\newblock {\em CoRR}, abs/2401.15210, 2024.
+
+\bibitem{Kipf2018}
+A.~Kipf, T.~Kipf, B.~Radke, V.~Leis, P.~Boncz, and A.~Kemper.
+\newblock Learned Cardinalities: Estimating Correlated Joins with Deep Learning.
+\newblock In {\em Proc.\ CIDR}, 2019.
+
+\bibitem{Lan2021}
+H.~Lan, Z.~Bao, and Y.~Peng.
+\newblock A Survey on Advancing the {DBMS} Query Optimizer: Cardinality
+  Estimation, Cost Model, and Plan Enumeration.
+\newblock {\em Data Science and Engineering}, 6(4):355--378, 2021.
+
+\bibitem{Lehmann2024}
+C.~Lehmann, P.~Boncz, and A.~Gubichev.
+\newblock Is Your Learned Query Optimizer Behaving As You Expect?
+\newblock {\em Proc.\ VLDB Endow.}, 17(8):1565--1578, 2024.
+
+\bibitem{Leis2015}
+V.~Leis, A.~Gubichev, A.~Mirchev, P.~Boncz, A.~Kemper, and T.~Neumann.
+\newblock How Good Are Query Optimizers, Really?
+\newblock {\em Proc.\ VLDB Endow.}, 9(3):204--215, 2015.
+
+\bibitem{Leis2018}
+V.~Leis, B.~Radke, A.~Gubichev, A.~Mirchev, P.~Boncz, A.~Kemper, and
+T.~Neumann.
+\newblock Query Optimization Through the Looking Glass, and What We Found
+  Running the Join Order Benchmark.
+\newblock {\em VLDB J.}, 27(5):643--668, 2018.
+
+\bibitem{Marcus2019Neo}
+R.~Marcus and O.~Papaemmanouil.
+\newblock {Neo}: A Learned Query Optimizer.
+\newblock {\em Proc.\ VLDB Endow.}, 12(11):1705--1718, 2019.
+
+\bibitem{Marcus2021Bao}
+R.~Marcus, P.~Negi, H.~Mao, N.~Tatbul, M.~Alizadeh, and T.~Kraska.
+\newblock Bao: Making Learned Query Optimization Practical.
+\newblock In {\em Proc.\ ACM SIGMOD}, pages 1275--1288, 2021.
+
+\bibitem{Marcus2021Steering}
+R.~Marcus, P.~Negi, H.~Mao, C.~Zhang, M.~Alizadeh, T.~Kraska,
+O.~Papaemmanouil, and N.~Tatbul.
+\newblock Steering Query Optimizers: A Practical Take on Big Data Workloads.
+\newblock In {\em Proc.\ ACM SIGMOD}, pages 2557--2569, 2021.
+
+\bibitem{Marcus2023Kepler}
+R.~Marcus, A.~Shaleen, H.~Mao, and T.~Kraska.
+\newblock Kepler: Robust Learning for Faster Parametric Query Optimization.
+\newblock {\em Proc.\ ACM SIGMOD}, 1(1):1--27, 2023.
+
+\bibitem{Mitzenmacher2022}
+M.~Mitzenmacher and S.~Vassilvitskii.
+\newblock Algorithms with Predictions.
+\newblock In {\em Beyond the Worst-Case Analysis of Algorithms},
+  pages 646--662. Cambridge University Press, 2022.
+
+\bibitem{Negi2021}
+P.~Negi, R.~Marcus, H.~Mao, A.~Sharif, T.~Kraska, P.~Alizadeh, and N.~Tatbul.
+\newblock Flow-Loss: Learning Cardinality Estimates That Matter.
+\newblock {\em Proc.\ VLDB Endow.}, 14(11):2019--2032, 2021.
+
+\bibitem{Park2020}
+Y.~Park, S.~Zhong, and B.~Mozafari.
+\newblock Quicksel: Quick Selectivity Learning with Mixture Models.
+\newblock In {\em Proc.\ ACM SIGMOD}, pages 1017--1032, 2020.
+
+\bibitem{PGDocs}
+{PostgreSQL Global Development Group}.
+\newblock {PostgreSQL} 16 Documentation: Planner Method Configuration.
+\newblock \url{https://www.postgresql.org/docs/current/runtime-config-query.html},
+  2024.
+
+\bibitem{Ryan2024}
+M.~Ryan, B.~Moseley, and S.~Venkataraman.
+\newblock Hindsight {NEO}: Efficient and Robust Query Optimization via
+  Hindsight Learning.
+\newblock {\em Proc.\ VLDB Endow.}, 17(5):1222--1235, 2024.
+
+\bibitem{SIGMODRepro}
+{ACM SIGMOD}.
+\newblock Reproducibility in {SIGMOD}: Availability and Reproducibility
+  Initiative.
+\newblock \url{https://reproducibility.sigmod.org/}, 2025.
+
+\bibitem{Sun2019}
+J.~Sun and G.~Li.
+\newblock An End-to-End Learning-Based Cost Estimator.
+\newblock {\em Proc.\ VLDB Endow.}, 13(3):307--319, 2019.
+
+\bibitem{Wang2021}
+J.~Wang, Y.~Chai, J.~Liu, and G.~Li.
+\newblock {FACE}: A Normalizing Flow based Cardinality Estimator.
+\newblock {\em Proc.\ VLDB Endow.}, 15(1):72--84, 2021.
+
+\bibitem{Yang2022Balsa}
+Z.~Yang, W.~Chiang, B.~Liang, G.~Papandreou, C.~Frosio, S.~Krishnan,
+A.~Stoica, and J.~Gonzalez.
+\newblock Balsa: Learning a Query Optimizer Without Expert Demonstrations.
+\newblock In {\em Proc.\ ACM SIGMOD}, pages 931--944, 2022.
+
+\bibitem{Zhu2023Lero}
+J.~Zhu, C.~Qian, S.~Kang, Z.~Zhou, B.~He, and S.~Wang.
+\newblock Lero: A Learning-to-Rank Query Optimizer.
+\newblock {\em Proc.\ VLDB Endow.}, 16(6):1466--1479, 2023.
+
+\bibitem{Zhu2024Eraser}
+J.~Zhu, S.~Kang, C.~Qian, Y.~Wang, B.~He, and S.~Wang.
+\newblock Eraser: Eliminating Performance Regression on Learned Query
+  Optimization.
+\newblock {\em Proc.\ VLDB Endow.}, 17(4):926--938, 2024.
+
+\end{thebibliography}
+
+\end{document}

@@ -1,0 +1,1 @@
+query_id,arm,repeat,execution_time_ms,planning_time_ms,wall_time_ms,root_total_cost,root_plan_rows,root_plan_width,hash_join_count,merge_join_count,nested_loop_count,seq_scan_count,index_scan_count,total_node_count,max_depth,status,error_message,plan_json

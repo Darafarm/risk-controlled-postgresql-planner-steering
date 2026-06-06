@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.pyc
+
+# Spyder
+.spyder-py3/
+.ipynb_checkpoints/
+
+# Logs
+*.log
+*.tmp
+
+# Virtual environments
+venv/
+.venv/
+
+# OS files
+Thumbs.db
+.DS_Store
+
+# Large data files
+*.zip
+*.tar
+*.gz
+
+# Do not upload database dumps
+*.sql.gz
+*.dump
+
+# Ignore raw experiment outputs
+*.csv
+!results/*.csv
+
+# Ignore Docker files
+*.vhdx
