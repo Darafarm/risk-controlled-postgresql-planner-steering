@@ -161,7 +161,7 @@ The experiments were run against a PostgreSQL instance in Docker on port 5433. U
 
 ## Reproducing the Experiments
 
-### Step 1 — Generate the scaled workload
+### Step 1 : Generate the scaled workload
 
 Scale the 113 canonical JOB queries to 904 variants by varying numeric ranges in `BETWEEN` and `LIMIT` clauses:
 
@@ -169,7 +169,7 @@ Scale the 113 canonical JOB queries to 904 variants by varying numeric ranges in
 python scripts/generate_queries.py
 ```
 
-### Step 2 — Run the experiment
+### Step 2 : Run the experiment
 
 Execute all 3,616 query-arm combinations (904 queries × 4 arms) with 3 repeats each. Execution order is fully randomized (seed = 42) to eliminate cache warm-up bias:
 
@@ -179,7 +179,7 @@ python scripts/run_experiment.py
 
 Total runtime is approximately 7 hours on a local machine. Output is written to `data/tau_experiment_904.csv`.
 
-### Step 3 — Train the model and run the threshold sweep
+### Step 3 : Train the model and run the threshold sweep
 
 Train all six model families under 5-fold stratified cross-validation and run the tau sweep from 0 to 5,000 ms:
 
@@ -187,7 +187,7 @@ Train all six model families under 5-fold stratified cross-validation and run th
 python scripts/train_model.py
 ```
 
-### Step 4 — Generate figures
+### Step 4 : Generate figures
 
 ```bash
 python scripts/visualize.py
