@@ -9,7 +9,7 @@ Department of Electrical and Computer Engineering, Marquette University
 
 ## Overview
 
-RiskSteer is a lightweight, non-intrusive query planner steering system for PostgreSQL. It selects among four session-level planner configurations on a per-query basis using only features extracted from `EXPLAIN (FORMAT JSON)` output — before the query executes. A risk-controlled threshold policy falls back to the default planner when the predicted benefit of steering is insufficient, directly targeting the no-regression requirement that is essential for production deployment.
+RiskSteer is a lightweight, non-intrusive query planner steering system for PostgreSQL. It selects among four session-level planner configurations on a per-query basis using only features extracted from `EXPLAIN (FORMAT JSON)` output - before the query executes. A risk-controlled threshold policy falls back to the default planner when the predicted benefit of steering is insufficient, directly targeting the no-regression requirement that is essential for production deployment.
 
 On a 904-query scaled Join Order Benchmark (JOB) workload, RiskSteer reduces total execution time by **37.3%** relative to the default PostgreSQL planner, reaching within **0.3 percentage points** of oracle performance, with **zero regressions** observed across all tested threshold values.
 
